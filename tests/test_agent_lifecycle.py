@@ -438,3 +438,115 @@ async def test_enable_events_flag_reaches_the_create_body() -> None:
     await agent.run("Research this.", enable_events=True, poll_interval_seconds=0.001)
 
     assert seen_bodies[0]["enable_events"] is True
+
+
+async def test_on_created_exception_does_not_strand_the_run() -> None:
+    """Verify that on_created is an observer, not a
+    lifecycle-controlling hook -- if it raises after the billable create
+    already succeeded, the run must still be polled to completion and
+    returned, not stranded because of unrelated observer/UI code."""
+
+    handler, _ = _router(
+        {
+            ("POST", "/v2/agents/runs"): json_response(202, run_body(status="queued")),
+            ("GET", f"/v2/agents/{AGENT_ID}/runs/{RUN_ID}"): json_response(
+                200, run_body(status="completed")
+            ),
+            ("GET", f"/v2/agents/{AGENT_ID}/runs/{RUN_ID}/result"): json_response(200, result_body()),
+        }
+    )
+    agent = _agent(handler)
+
+    def failing_on_created(_run: object) -> None:
+        raise RuntimeError("telemetry backend unavailable")
+
+    response = await agent.run(
+        "Research this.",
+        poll_interval_seconds=0.001,
+        on_created=failing_on_created,
+    )
+
+    assert response.messages[-1].text == "The answer, with a citation.[1]"
+
+
+async def test_on_status_exception_does_not_strand_the_run() -> None:
+    """Same isolation for on_status: a raise on one status transition must
+    not stop polling from continuing to the next transition and reaching
+    the terminal state."""
+
+    handler, _ = _router(
+        {
+            ("POST", "/v2/agents/runs"): json_response(202, run_body(status="queued")),
+            ("GET", f"/v2/agents/{AGENT_ID}/runs/{RUN_ID}"): [
+                json_response(200, run_body(status="queued")),
+                json_response(200, run_body(status="running")),
+                json_response(200, run_body(status="completed")),
+            ],
+            ("GET", f"/v2/agents/{AGENT_ID}/runs/{RUN_ID}/result"): json_response(200, result_body()),
+        }
+    )
+    agent = _agent(handler)
+    seen: list[str] = []
+
+    def flaky_on_status(status: str) -> None:
+        seen.append(status)
+        if status == "running":
+            raise RuntimeError("UI panel disposed mid-poll")
+
+    response = await agent.run(
+        "Research this.",
+        poll_interval_seconds=0.001,
+        on_status=flaky_on_status,
+    )
+
+    assert seen == ["queued", "running", "completed"]
+    assert response.messages[-1].text == "The answer, with a citation.[1]"
+
+
+async def test_poll_status_api_error_preserves_run_id() -> None:
+    """Verify that a status-GET failure during polling preserves identity.
+
+    The failure must
+    keep run_id on the typed exception -- poll_to_terminal already knows
+    it, and a caller needs it to identify/recover the already-created,
+    already-billed run rather than risk submitting a duplicate."""
+
+    handler, _ = _router(
+        {
+            ("POST", "/v2/agents/runs"): json_response(202, run_body(status="queued")),
+            ("GET", f"/v2/agents/{AGENT_ID}/runs/{RUN_ID}"): httpx.Response(
+                500, json={"error": {"message": "internal error"}}, request=httpx.Request("GET", "http://test")
+            ),
+        }
+    )
+    agent = _agent(handler)
+
+    with pytest.raises(Exception) as excinfo:
+        await agent.run("Research this.", poll_interval_seconds=0.001)
+
+    assert excinfo.value.run_id == RUN_ID  # type: ignore[attr-defined]
+    assert excinfo.value.agent_id == AGENT_ID  # type: ignore[attr-defined]
+
+
+async def test_fetch_result_api_error_preserves_run_id() -> None:
+    """Same guarantee for the result-fetch failure path: the run reached
+    'completed' (poll succeeded), but the result GET itself fails."""
+
+    handler, _ = _router(
+        {
+            ("POST", "/v2/agents/runs"): json_response(202, run_body(status="queued")),
+            ("GET", f"/v2/agents/{AGENT_ID}/runs/{RUN_ID}"): json_response(
+                200, run_body(status="completed")
+            ),
+            ("GET", f"/v2/agents/{AGENT_ID}/runs/{RUN_ID}/result"): httpx.Response(
+                500, json={"error": {"message": "internal error"}}, request=httpx.Request("GET", "http://test")
+            ),
+        }
+    )
+    agent = _agent(handler)
+
+    with pytest.raises(Exception) as excinfo:
+        await agent.run("Research this.", poll_interval_seconds=0.001)
+
+    assert excinfo.value.run_id == RUN_ID  # type: ignore[attr-defined]
+    assert excinfo.value.agent_id == AGENT_ID  # type: ignore[attr-defined]

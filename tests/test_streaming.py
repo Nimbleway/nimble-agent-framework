@@ -54,3 +54,28 @@ async def test_stream_true_get_final_response_preserves_nimble_metadata() -> Non
     nimble = final.messages[-1].contents[0].additional_properties["nimble"]
     assert nimble["run"]["web_search_agent_id"] == AGENT_ID
     assert nimble["trust"]["confidence"] == "high"
+
+
+async def test_stream_true_get_final_response_preserves_structured_value() -> None:
+    """Verify that a stream=True JSON result does not lose
+    AgentResponse.value in get_final_response() -- the non-streaming route
+    (_run) and the streaming route (_run_stream) must agree on .value for
+    the same underlying result."""
+
+    def json_handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            return json_response(202, run_body(status="queued"))
+        if request.url.path.endswith("/result"):
+            return json_response(
+                200, result_body(output_type="json", content={"summary": "ok"})
+            )
+        return json_response(200, run_body(status="completed"))
+
+    agent = _agent(json_handler)
+    stream = agent.run("Enrich this.", stream=True, poll_interval_seconds=0.001)
+
+    async for _ in stream:
+        pass
+    final = await stream.get_final_response()
+
+    assert final.value == {"summary": "ok"}

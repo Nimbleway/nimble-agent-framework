@@ -12,6 +12,7 @@ tested in isolation from the framework response-mapping layer in
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any, cast
@@ -101,7 +102,7 @@ def safe_reader(client: AsyncNimble, *, retries: int = DEFAULT_SAFE_READ_RETRIES
     return client.with_options(max_retries=retries)
 
 
-def _map_api_error(exc: Exception, *, agent_id: str | None) -> Exception:
+def _map_api_error(exc: Exception, *, agent_id: str | None, run_id: str | None = None) -> Exception:
     """Map a nimble-python exception to this adapter's typed taxonomy.
 
     The distinctions matter because create is never auto-retried: a caller
@@ -110,19 +111,25 @@ def _map_api_error(exc: Exception, *, agent_id: str | None) -> Exception:
     "well-formed but throttled" (:class:`NimbleRateLimitError`) and
     "service-side failure, outcome possibly ambiguous"
     (:class:`NimbleServerError`).
+
+    ``run_id`` is ``None`` for the create-call sites (no run exists yet) but
+    must be passed by any *post-create* caller (polling, result fetch) --
+    otherwise a caller catching the resulting typed exception has no way to
+    identify or recover the already-created, already-billed run, and may
+    resubmit a duplicate.
     """
 
     if isinstance(exc, nimble_python.AuthenticationError | nimble_python.PermissionDeniedError):
-        return NimbleAuthError(str(exc), agent_id=agent_id, inner_exception=exc)
+        return NimbleAuthError(str(exc), run_id=run_id, agent_id=agent_id, inner_exception=exc)
     if isinstance(exc, nimble_python.RateLimitError):
-        return NimbleRateLimitError(str(exc), agent_id=agent_id, inner_exception=exc)
+        return NimbleRateLimitError(str(exc), run_id=run_id, agent_id=agent_id, inner_exception=exc)
     if isinstance(exc, nimble_python.APIStatusError):
         if exc.status_code >= 500:
-            return NimbleServerError(str(exc), agent_id=agent_id, inner_exception=exc)
-        return NimbleInvalidRequestError(str(exc), agent_id=agent_id, inner_exception=exc)
+            return NimbleServerError(str(exc), run_id=run_id, agent_id=agent_id, inner_exception=exc)
+        return NimbleInvalidRequestError(str(exc), run_id=run_id, agent_id=agent_id, inner_exception=exc)
     if isinstance(exc, nimble_python.APIConnectionError):
         return NimbleInvalidResponseError(
-            f"Nimble request failed: {exc}", agent_id=agent_id, inner_exception=exc
+            f"Nimble request failed: {exc}", run_id=run_id, agent_id=agent_id, inner_exception=exc
         )
     return exc
 
@@ -251,10 +258,15 @@ async def poll_to_terminal(
         try:
             run = await reader.agents.runs.get(run_id, agent_id=agent_id)
         except Exception as exc:
-            raise _map_api_error(exc, agent_id=agent_id) from exc
+            raise _map_api_error(exc, agent_id=agent_id, run_id=run_id) from exc
         status = run.status
         if status != previous_status and on_status is not None:
-            on_status(status)
+            # Observer-only: the run is already accepted and being polled
+            # server-side, so a raise here (a UI panel disposed, a
+            # telemetry sink down) must not stop polling -- otherwise
+            # unrelated observer code would strand an in-flight run.
+            with contextlib.suppress(Exception):
+                on_status(status)
         previous_status = status
         if status in TERMINAL_STATES:
             return run
@@ -319,7 +331,7 @@ async def fetch_result(
     except nimble_python.UnprocessableEntityError as exc:
         raise _failed_result_error(exc, run_id=run_id, agent_id=agent_id) from exc
     except Exception as exc:
-        raise _map_api_error(exc, agent_id=agent_id) from exc
+        raise _map_api_error(exc, agent_id=agent_id, run_id=run_id) from exc
 
 
 def _failed_result_error(

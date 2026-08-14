@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import inspect
 from collections.abc import AsyncIterable, Awaitable, Sequence
 from typing import Any, Literal, overload
@@ -196,9 +197,22 @@ class NimbleWebSearchAgent(BaseAgent):
         """
 
         if stream:
+            # AgentResponse.from_updates only ever sees AgentResponseUpdate
+            # objects, which carry text/contents but not the structured
+            # .value a JSON-output run produces -- so a plain
+            # `finalizer=AgentResponse.from_updates` silently drops it (a
+            # streamed JSON result and a non-streamed JSON result would
+            # otherwise disagree on `.value`). `value_holder` carries the
+            # completed response's `.value` out of `_run_stream` so the
+            # finalizer below can pass it through `from_updates(value=...)`.
+            value_holder: dict[str, Any] = {}
+
+            def _finalize(updates: Sequence[AgentResponseUpdate]) -> AgentResponse:
+                return AgentResponse.from_updates(updates, value=value_holder.get("value"))
+
             return ResponseStream(
-                self._run_stream(messages=messages, session=session, **kwargs),
-                finalizer=AgentResponse.from_updates,
+                self._run_stream(messages=messages, session=session, value_holder=value_holder, **kwargs),
+                finalizer=_finalize,
             )
         return self._run(messages=messages, session=session, **kwargs)
 
@@ -235,10 +249,14 @@ class NimbleWebSearchAgent(BaseAgent):
         # available immediately), `on_status` fires on each status change
         # while polling. Both are observers only -- they cannot alter the
         # lifecycle -- and exist so hosts (e.g. a UI) can show live progress
-        # without bypassing the framework-native run() entry point.
+        # without bypassing the framework-native run() entry point. The
+        # create call has already succeeded and is billable by this point,
+        # so an observer exception is isolated (not propagated) rather than
+        # stranding an already-accepted remote run.
         on_created = kwargs.get("on_created")
         if on_created is not None:
-            on_created(created)
+            with contextlib.suppress(Exception):
+                on_created(created)
 
         terminal = await poll_to_terminal(
             self._client,
@@ -267,6 +285,7 @@ class NimbleWebSearchAgent(BaseAgent):
         messages: str | Message | Sequence[str | Message] | None = None,
         *,
         session: AgentSession | None = None,
+        value_holder: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> AsyncIterable[AgentResponseUpdate]:
         """Yield the agent's response as a single update.
@@ -280,9 +299,18 @@ class NimbleWebSearchAgent(BaseAgent):
         the full response -- still a correct, spec-conformant
         ``ResponseStream`` producer, and callers that only need the final
         result can still ``await stream.get_final_response()``.
+
+        ``value_holder``, if given, receives the completed response's
+        structured ``.value`` under the ``"value"`` key before the first
+        update is yielded -- ``run(stream=True)`` uses this to carry
+        ``AgentResponse.value`` through ``AgentResponse.from_updates``,
+        which otherwise has no way to see it (it only ever sees
+        ``AgentResponseUpdate`` objects, which don't carry ``.value``).
         """
 
         response = await self._run(messages=messages, session=session, **kwargs)
+        if value_holder is not None:
+            value_holder["value"] = response.value
         for message in response.messages:
             yield AgentResponseUpdate(
                 contents=list(message.contents),
