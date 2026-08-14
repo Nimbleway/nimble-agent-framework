@@ -8,7 +8,11 @@ from pathlib import Path
 
 import httpx
 import pytest
-import tomllib
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - exercised on Python 3.10 CI
+    import tomli as tomllib
 from conftest import RecordingTransport, json_response, result_body, run_body
 
 from nimble_agent_framework import GatedNimbleEffortError, NimbleWebSearchAgent
