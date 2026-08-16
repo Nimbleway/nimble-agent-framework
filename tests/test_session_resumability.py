@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 
 import httpx
+import pytest
 from agent_framework import AgentSession
 from conftest import AGENT_ID, RUN_ID, RecordingTransport, json_response, result_body, run_body
 
@@ -64,6 +65,24 @@ async def test_session_state_and_service_session_id_populated_after_run() -> Non
     assert session.service_session_id == AGENT_ID
 
 
+async def test_non_mapping_nimble_session_state_is_replaced_after_completed_run() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            return json_response(202, run_body(status="queued"))
+        if request.url.path.endswith("/result"):
+            return json_response(200, result_body())
+        return json_response(200, run_body(status="completed"))
+
+    agent = _agent(handler)
+    session = agent.create_session()
+    session.state["nimble"] = "invalid-host-state"
+
+    await agent.run("First question.", session=session, poll_interval_seconds=0.001)
+
+    assert session.state["nimble"]["last_run_id"] == RUN_ID
+    assert session.state["nimble"]["interaction_id"] == "interaction_1"
+
+
 async def test_second_run_on_same_session_sends_previous_interaction_id_and_only_new_message() -> None:
     seen_bodies: list[dict] = []
 
@@ -106,6 +125,43 @@ async def test_run_without_a_session_omits_previous_interaction_id_every_time() 
 
     assert "previous_interaction_id" not in seen_bodies[0]
     assert "previous_interaction_id" not in seen_bodies[1]
+
+
+async def test_fresh_run_rejects_multiple_messages_instead_of_dropping_history() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("validation must happen before any network request")
+
+    agent = _agent(handler)
+    with pytest.raises(ValueError, match="fresh Nimble run accepts exactly one input message"):
+        await agent.run(["First question.", "Second question."])
+
+    fresh_session = agent.create_session()
+    with pytest.raises(ValueError, match="fresh Nimble run accepts exactly one input message"):
+        await agent.run(["First question.", "Second question."], session=fresh_session)
+
+
+async def test_resumed_run_with_message_history_sends_only_latest_turn() -> None:
+    seen_bodies: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            seen_bodies.append(json.loads(request.content))
+            return json_response(202, run_body(status="queued"))
+        if request.url.path.endswith("/result"):
+            return json_response(200, result_body())
+        return json_response(200, run_body(status="completed"))
+
+    agent = _agent(handler)
+    session = agent.create_session()
+    session.state["nimble"] = {"interaction_id": "interaction_previous"}
+    await agent.run(
+        ["Earlier turn already held by the service.", "Newest turn."],
+        session=session,
+        poll_interval_seconds=0.001,
+    )
+
+    assert seen_bodies[0]["input"] == "Newest turn."
+    assert seen_bodies[0]["previous_interaction_id"] == "interaction_previous"
 
 
 async def test_session_round_trips_through_to_dict_from_dict() -> None:

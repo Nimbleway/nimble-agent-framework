@@ -77,11 +77,11 @@ already written against the framework's streaming contract.
 # Omit `effort` to let Nimble apply its own server-side default.
 await agent.run("...", effort="high")
 
-# effort="max" is a coming-soon, custom-budget tier. It is rejected by
+# effort="max" is not generally available. It is rejected by
 # default with an actionable error rather than silently sent or downgraded:
 await agent.run("...", effort="max")
 # nimble_agent_framework.GatedNimbleEffortError: effort='max' is a
-# coming-soon, custom-budget Agent API V2 tier; ... Pass effort='x-high' to
+# not generally available and is not sent to Nimble. Pass effort='x-high' to
 # proceed now, or construct NimbleWebSearchAgent with gate_policy='degrade'
 # to opt into automatic substitution of 'x-high'.
 
@@ -146,6 +146,10 @@ Issues and pull requests are welcome. Run `pip install -e ".[dev]"`, then
 ## License
 
 MIT — see [`LICENSE`](LICENSE).
+
+Microsoft and Microsoft Agent Framework are trademarks of Microsoft Corporation.
+This project is independently developed by Nimbleway and is not endorsed by or
+affiliated with Microsoft.
 
 ## Security
 

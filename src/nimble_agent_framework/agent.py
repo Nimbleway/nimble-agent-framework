@@ -67,7 +67,7 @@ class NimbleWebSearchAgent(BaseAgent):
 
     ``effort`` is never silently raised: an unset per-run effort omits the
     field entirely so the agent/server default applies, and
-    ``effort="max"`` (a coming-soon, custom-budget tier) is rejected by
+    ``effort="max"`` (which is not generally available) is rejected by
     default with an actionable message rather than silently sent or
     silently downgraded -- see :mod:`nimble_agent_framework._gating`.
     """
@@ -121,9 +121,8 @@ class NimbleWebSearchAgent(BaseAgent):
             client: A pre-built ``AsyncNimble`` client (for tests, or to
                 share a client across agents). When supplied, ``api_key``/
                 ``base_url``/``timeout_seconds`` are ignored.
-            **kwargs: Forwarded to ``BaseAgent.__init__`` (``id``,
-                ``context_providers``, ``middleware``,
-                ``additional_properties``).
+            **kwargs: Forwarded to ``BaseAgent.__init__`` (for example,
+                ``id`` and ``additional_properties``).
         """
 
         super().__init__(name=name, description=description, **kwargs)
@@ -225,8 +224,8 @@ class NimbleWebSearchAgent(BaseAgent):
         session: AgentSession | None = None,
         **kwargs: Any,
     ) -> AgentResponse:
-        prompt = self._latest_input_text(messages)
         previous_interaction_id = self._previous_interaction_id(session)
+        prompt = self._latest_input_text(messages, resumed=previous_interaction_id is not None)
 
         # Optional one-use admission gate: a sync or async zero-arg callable
         # invoked immediately before the billable, non-idempotent create --
@@ -385,12 +384,19 @@ class NimbleWebSearchAgent(BaseAgent):
         return owner
 
     @staticmethod
-    def _latest_input_text(messages: str | Message | Sequence[str | Message] | None) -> str:
+    def _latest_input_text(
+        messages: str | Message | Sequence[str | Message] | None, *, resumed: bool
+    ) -> str:
         normalized = normalize_messages(messages)
         if not normalized:
             raise ValueError(
                 "NimbleWebSearchAgent.run() requires at least one message; "
                 "Agent API V2 'input' cannot be empty"
+            )
+        if len(normalized) > 1 and not resumed:
+            raise ValueError(
+                "A fresh Nimble run accepts exactly one input message; pass a single message, "
+                "or provide an AgentSession when sending a new turn in an existing conversation"
             )
         text = normalized[-1].text
         if not text or not text.strip():
@@ -411,7 +417,10 @@ class NimbleWebSearchAgent(BaseAgent):
     def _remember_session(session: AgentSession | None, *, agent_id: str, run: Any) -> None:
         if session is None:
             return
-        state = session.state.setdefault(_STATE_KEY, {})
+        state = session.state.get(_STATE_KEY)
+        if not isinstance(state, dict):
+            state = {}
+            session.state[_STATE_KEY] = state
         state["web_search_agent_id"] = agent_id
         state["interaction_id"] = run.interaction_id
         state["last_run_id"] = run.id

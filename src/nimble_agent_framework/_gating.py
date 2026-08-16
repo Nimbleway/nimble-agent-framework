@@ -1,7 +1,7 @@
-"""Positive, auditable handling for coming-soon Agent API V2 effort tiers.
+"""Positive, auditable handling for unavailable Agent API V2 effort tiers.
 
 ``max`` is visible in the published ``effort`` schema but is not yet a
-generally available tier -- it is a coming-soon, custom-budget capability.
+generally available tier.
 This module keeps it *selectable* (never silently dropped) while guaranteeing
 it is never sent to the API as if it were generally available: by default a
 request for ``max`` raises with an explanation of what would ship instead and
@@ -34,8 +34,7 @@ class GatedNimbleEffortError(ValueError):
         self.policy = policy
         self.closest_available = _CLOSEST_AVAILABLE
         message = (
-            "effort='max' is a coming-soon, custom-budget Agent API V2 tier; "
-            "it is not sent to Nimble as if it were generally available. "
+            "effort='max' is not generally available and is not sent to Nimble. "
             f"Pass effort='{_CLOSEST_AVAILABLE}' to proceed now, or construct "
             "NimbleWebSearchAgent with gate_policy='degrade' to opt into "
             f"automatic substitution of '{_CLOSEST_AVAILABLE}'."

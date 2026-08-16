@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Generated-agent and persistent-agent modes.
 - Multi-turn session resumability via `previous_interaction_id`.
 - Framework-compatible `stream=True` support (single completed-answer update).
-- Effort-tier gating: `effort="max"` (a coming-soon, custom-budget tier) is
+- Effort-tier gating: `effort="max"` (not generally available) is
   rejected by default with an actionable error, or auto-substituted with
   `effort="x-high"` when `gate_policy="degrade"`.
 - Full result fidelity: text/JSON output and trust metadata (confidence,

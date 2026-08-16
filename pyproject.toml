@@ -8,8 +8,8 @@ version = "0.1.0"
 description = "Nimble Web Search Agent (Agent API V2) as a native Microsoft Agent Framework BaseAgent."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
-authors = [{ name = "Wildcard" }]
+license = "MIT"
+authors = [{ name = "Nimbleway" }]
 keywords = ["agent-framework", "nimble", "web-search", "agents"]
 classifiers = [
   "Development Status :: 3 - Alpha",
@@ -33,6 +33,7 @@ dev = [
   "pytest-asyncio>=0.24",
   "ruff>=0.6",
   "mypy>=1.11",
+  "packaging>=24.0",
   "tomli>=2.0; python_version < '3.11'",
 ]
 
