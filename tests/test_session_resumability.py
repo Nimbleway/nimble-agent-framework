@@ -140,6 +140,21 @@ async def test_fresh_run_rejects_multiple_messages_instead_of_dropping_history()
         await agent.run(["First question.", "Second question."], session=fresh_session)
 
 
+@pytest.mark.parametrize("interaction_id", ["", "   "])
+async def test_blank_interaction_id_does_not_mark_session_as_resumed(
+    interaction_id: str,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("validation must happen before any network request")
+
+    agent = _agent(handler)
+    session = agent.create_session()
+    session.state["nimble"] = {"interaction_id": interaction_id}
+
+    with pytest.raises(ValueError, match="fresh Nimble run accepts exactly one input message"):
+        await agent.run(["First question.", "Second question."], session=session)
+
+
 async def test_resumed_run_with_message_history_sends_only_latest_turn() -> None:
     seen_bodies: list[dict] = []
 

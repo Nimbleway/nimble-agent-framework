@@ -411,7 +411,7 @@ class NimbleWebSearchAgent(BaseAgent):
         if not isinstance(state, dict):
             return None
         interaction_id = state.get("interaction_id")
-        return interaction_id if isinstance(interaction_id, str) else None
+        return interaction_id if isinstance(interaction_id, str) and interaction_id.strip() else None
 
     @staticmethod
     def _remember_session(session: AgentSession | None, *, agent_id: str, run: Any) -> None:
