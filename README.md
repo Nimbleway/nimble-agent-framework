@@ -80,8 +80,8 @@ await agent.run("...", effort="high")
 # effort="max" is not generally available. It is rejected by
 # default with an actionable error rather than silently sent or downgraded:
 await agent.run("...", effort="max")
-# nimble_agent_framework.GatedNimbleEffortError: effort='max' is a
-# not generally available and is not sent to Nimble. Pass effort='x-high' to
+# nimble_agent_framework.GatedNimbleEffortError: effort='max' is not generally
+# available and is not sent to Nimble. Pass effort='x-high' to
 # proceed now, or construct NimbleWebSearchAgent with gate_policy='degrade'
 # to opt into automatic substitution of 'x-high'.
 
@@ -157,3 +157,6 @@ API keys are read from `NIMBLE_API_KEY` (or the `api_key` constructor
 argument) and passed only as the SDK's own `Authorization: Bearer ...`
 header. No key value is ever logged, included in an exception message, or
 reflected in a response.
+
+Report suspected vulnerabilities privately as described in
+[`SECURITY.md`](SECURITY.md).
