@@ -4,6 +4,8 @@ excerpts preserved as native structures, never lossy-stringified.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from conftest import result_body
 from nimble_python.types.agents.run_result_response import RunResultResponse
 from pydantic import TypeAdapter
@@ -97,6 +99,28 @@ def test_json_shaped_output_with_type_omitted_is_detected_as_json() -> None:
     nimble = message.contents[0].additional_properties["nimble"]
     assert nimble["output_type"] == "json"
     assert nimble["output"] == structured
+    assert response.value == structured
+    assert isinstance(message.text, str) and "field" in message.text
+
+
+def test_json_shaped_output_declared_as_text_is_normalized_to_json() -> None:
+    """A malformed explicit text discriminator must not put a dict in Content.text."""
+
+    structured = {"field": "value"}
+    result = SimpleNamespace(
+        output=SimpleNamespace(
+            type="text",
+            content=structured,
+            trust={"confidence": "high", "sources": [], "claims": []},
+        ),
+        run={"id": "task_run_test"},
+    )
+
+    response = result_to_agent_response(result, agent_id="framework-agent-id")
+
+    message = response.messages[-1]
+    nimble = message.contents[0].additional_properties["nimble"]
+    assert nimble["output_type"] == "json"
     assert response.value == structured
     assert isinstance(message.text, str) and "field" in message.text
 

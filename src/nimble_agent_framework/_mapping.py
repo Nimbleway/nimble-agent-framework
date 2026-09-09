@@ -56,8 +56,10 @@ def result_to_agent_response(result: Any, *, agent_id: str | None = None) -> Age
     # shape rather than assuming "text", so a dict/list payload is never
     # mis-rendered through the text path.
     output_type = getattr(output, "type", None)
-    if output_type is None:
-        output_type = "json" if isinstance(output.content, dict | list) else "text"
+    if output_type != "json" and isinstance(output.content, dict | list):
+        output_type = "json"
+    elif output_type is None:
+        output_type = "text"
     trust_dict = _model_dict(output.trust)
     run_dict = _model_dict(result.run)
 
